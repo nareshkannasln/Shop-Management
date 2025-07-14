@@ -1,90 +1,60 @@
+// sales.js (Client Script for Sales doctype)
 frappe.ui.form.on('Sales', {
     refresh(frm) {
-        if (frm.doc.docstatus === 1) {
-            frm.add_custom_button('Update Purchase', () => {
-                let table_data = frm.doc.purchase.map(row => ({
+        // Add a custom button in the form
+        frm.add_custom_button(__('Edit Items'), () => {
+            // Build a dialog with a Table field for child items
+            let dialog = new frappe.ui.Dialog({
+                title: __('Edit Sales Items'),
+                fields: [
+                    {
+                        fieldname: 'items',
+                        label: __('Items'),
+                        fieldtype: 'Table',
+                        in_place_edit: true,
+                        data: [],
+                        fields: [
+                            // Hidden field to store the child row name (primary key)
+                            { fieldtype: 'Data', fieldname: 'name', hidden: 1 },
+                            { fieldtype: 'Link', fieldname: 'item', label: __('Item'), options: 'Item', in_list_view: 1 },
+                            { fieldtype: 'Float', fieldname: 'qty', label: __('Quantity'), default: 0, in_list_view: 1 },
+                            { fieldtype: 'Currency', fieldname: 'rate', label: __('Rate'), default: 0, in_list_view: 1 }
+                        ],
+                        reqd: 1
+                    }
+                ],
+                primary_action_label: __('Update'),
+                primary_action(values) {
+                    // Send the updated items to the server-side method
+                    frappe.call({
+                        method: 'sim.shop_management_system.doctype.sales.sales.edit_and_resubmit',
+                        args: {
+                            docname: frm.doc.name,
+                            updated_items: values.items
+                        },
+                        callback: (r) => {
+                            if (!r.exc) {
+                                frappe.msgprint(__("Sales items updated successfully"));
+                                frm.reload_doc();
+                            }
+                        }
+                    });
+                    dialog.hide();
+                }
+            });
+
+            // Pre-populate dialog with existing child table rows
+            frm.doc.purchase.forEach(row => {
+                dialog.fields_dict.items.df.data.push({
+                    name: row.name,   // preserve the row name
                     item: row.item,
                     qty: row.qty,
-                    rate: row.rate,
-                    amount: row.amount
-                }));
-
-                let dialog = new frappe.ui.Dialog({
-                    title: 'Edit Purchase Items',
-                    fields: [
-                        {
-                            fieldname: 'purchase_items',
-                            fieldtype: 'Table',
-                            cannot_add_rows: false,
-                            in_place_edit: true,
-                            data: table_data,
-                            fields: [
-                                {
-                                    label: 'Item',
-                                    fieldname: 'item',
-                                    fieldtype: 'Link',
-                                    options: 'Item',
-                                    in_list_view: true
-                                },
-                                {
-                                    label: 'Qty',
-                                    fieldname: 'qty',
-                                    fieldtype: 'Int',
-                                    in_list_view: true
-                                },
-                                {
-                                    label: 'Rate',
-                                    fieldname: 'rate',
-                                    fieldtype: 'Currency',
-                                    in_list_view: true
-                                },
-                                {
-                                    label: 'Amount',
-                                    fieldname: 'amount',
-                                    fieldtype: 'Currency',
-                                    in_list_view: true,
-                                    read_only: 1
-                                }
-                            ]
-                        }
-                    ],
-                    primary_action_label: 'Update',
-                    primary_action(values) {
-                        frm.clear_table('purchase');
-                        let total_amount = 0;
-
-                        (values.purchase_items || []).forEach(row => {
-                            let child = frm.add_child('purchase');
-                            child.item = row.item;
-                            child.qty = row.qty;
-                            child.rate = row.rate;
-                            child.amount = (row.qty || 0) * (row.rate || 0);
-                            total_amount += child.amount;
-                        });
-
-                        frm.set_value('total_amount', total_amount);
-                        frm.refresh_field('purchase');
-                        frm.refresh_field('total_amount');
-
-                        frappe.call({
-                            method: 'sim.shop_management_system.doctype.sales.sales.edit_and_resubmit',
-                            args: {
-                                docname: frm.doc.name,
-                                sales_items: JSON.stringify(values.purchase_items)
-                            },
-                            callback(r) {
-                                if (!r.exc) {
-                                    frappe.msgprint(__('Purchase items updated successfully'));
-                                    frm.reload_doc();
-                                    dialog.hide();
-                                }
-                            }
-                        });
-                    }
+                    rate: row.rate
                 });
-
-                dialog.show();
             });
-        }
+            dialog.fields_dict.items.df.data = dialog.fields_dict.items.df.data;
+            dialog.fields_dict.items.grid.refresh();
+            dialog.show();
+        });
     }
 });
