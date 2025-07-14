@@ -48,7 +48,7 @@ frappe.ui.form.on('Sales', {
                             ]
                         }
                     ],
-                    primary_action_label: 'Submit',
+                    primary_action_label: 'Update',
                     primary_action(values) {
                         frm.clear_table('purchase');
                         let total_amount = 0;
@@ -58,7 +58,7 @@ frappe.ui.form.on('Sales', {
                             child.item = row.item;
                             child.qty = row.qty;
                             child.rate = row.rate;
-                            child.amount = row.qty * row.rate || 0;
+                            child.amount = (row.qty || 0) * (row.rate || 0);
                             total_amount += child.amount;
                         });
 
@@ -66,28 +66,20 @@ frappe.ui.form.on('Sales', {
                         frm.refresh_field('purchase');
                         frm.refresh_field('total_amount');
 
-                        dialog.hide();
-
-                        frm.save()
-                            .then(() => {
-                                frappe.call({
-                                    method: 'sim.shop_management_system.doctype.sales.sales.submit_sales',
-                                    args: {
-                                        name: frm.doc.name
-                                    },
-                                    callback: function(r) {
-                                        if (!r.exc) {
-                                            frappe.msgprint(__('✅ Document submitted successfully'));
-                                            frm.reload_doc();
-                                        } else {
-                                            frappe.msgprint(__('❌ Failed to submit document: ') + r.exc);
-                                        }
-                                    }
-                                });
-                            })
-                            .catch(err => {
-                                frappe.msgprint(__('❌ Save failed: ') + err.message);
-                            });
+                        frappe.call({
+                            method: 'sim.shop_management_system.doctype.sales.sales.edit_and_resubmit',
+                            args: {
+                                docname: frm.doc.name,
+                                sales_items: JSON.stringify(values.purchase_items)
+                            },
+                            callback(r) {
+                                if (!r.exc) {
+                                    frappe.msgprint(__('Purchase items updated successfully'));
+                                    frm.reload_doc();
+                                    dialog.hide();
+                                }
+                            }
+                        });
                     }
                 });
 
