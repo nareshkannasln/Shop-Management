@@ -12,7 +12,9 @@ class Sales(Document):
             if not row.item:
                 frappe.throw("Item name cannot be empty in the purchase table.")
             if not row.qty or row.qty <= 0:
-                frappe.throw(f"Quantity must be greater than 0 for item: {row.item or '[Blank Item]'}")
+                frappe.throw(f"Quantity must be greater than 0 for item")
+            if not row.rate or row.rate <= 0:
+                frappe.throw(f"Rate must be greater than 0 for item")
 
             row.amount = (row.qty or 0) * (row.rate or 0)
             total += row.amount
@@ -24,45 +26,43 @@ class Sales(Document):
 
 @frappe.whitelist()
 def edit_and_resubmit(docname, updated_items):
-    """
-    Update Sales items (child table) in a submitted Sales document.
-    `updated_items` should be a list of dicts with keys: name, item, qty, rate.
-    """
-    # Get the submitted Sales document
+    print("updated_items:", updated_items)
+    # """
+    # Update Sales items (child table) in a submitted Sales document.
+    # `updated_items` should be a list of dicts with keys: name, item, qty, rate.
+    # """
     sales = frappe.get_doc('Sales', docname)
     if sales.docstatus != 1:
         frappe.throw(f"Sales document {docname} is not submitted.")
 
-    # Parse items (in case it's a JSON string)
     if isinstance(updated_items, str):
         updated_items = frappe.parse_json(updated_items)
 
-    # Validate incoming items
     for row in updated_items:
         if not row.get('item'):
             frappe.throw("Item is required for all rows.")
         if row.get('qty') is None or row.get('qty') <= 0:
-            frappe.throw(f"Quantity for item {row.get('item')} must be greater than zero.")
+            frappe.throw(f"Quantity for item must be greater than zero.")
+        if row.get('rate') is None or row.get('rate') <= 0:
+            frappe.throw(f"Rate for item must be greater than zero.")
 
-    # Collect existing child row names
-    existing_names = {row.name for row in sales.get('purchase', [])}
-    updated_names = set()
+            
+    existing = {row.name for row in sales.get('purchase', [])}
+    print("Existing items in Sales document:", existing)
+    updated = set()
+    print("Updated items to process:", updated_items)
 
-    # Update or insert each row from dialog
     for row in updated_items:
-        row_name = row.get('name')
-        amount = row['qty'] * row['rate']
-        if row_name and row_name in existing_names:
-            # Update existing child row
-            child = frappe.get_doc("Sales Item", row_name)
-            child.item = row['item']
-            child.qty = row['qty']
-            child.rate = row['rate']
-            child.amount = amount
-            child.db_update()  # bypasses validation
-            updated_names.add(row_name)
+        if "name" in row and row["name"] in existing:
+            frappe.db.set_value("Sales Item", row["name"], {
+                "item": row["item"],
+                "qty": row["qty"],
+                "rate": row["rate"],
+                "amount": row["qty"] * row["rate"]
+            })
+            updated.add(row["name"])
+
         else:
-            # Insert new child row
             new_child = frappe.get_doc({
                 "doctype": "Sales Item",
                 "parent": docname,
@@ -73,11 +73,10 @@ def edit_and_resubmit(docname, updated_items):
                 "rate": row['rate'],
                 "amount": amount
             })
-            new_child.db_insert()  # bypasses validation
-            updated_names.add(new_child.name)
+            new_child.db_insert()
+            updated.add(new_child.name)
 
-        # Delete any removed rows in a single SQL statement (no additional loop)
-    if updated_names:
+    if updated:
         frappe.db.sql(
             """
             DELETE FROM `tabSales Item`
@@ -86,10 +85,9 @@ def edit_and_resubmit(docname, updated_items):
               AND parentfield = 'purchase'
               AND name NOT IN %(names)s
             """,
-            {"parent": docname, "names": tuple(updated_names)}
+            {"parent": docname, "names": tuple(updated)}
         )
     else:
-        # If no updated rows, delete all rows for this Sales
         frappe.db.sql(
             """
             DELETE FROM `tabSales Item`
@@ -99,10 +97,11 @@ def edit_and_resubmit(docname, updated_items):
             """,
             {"parent": docname}
         )
-
-    # Update total_amount field on Sales("Sales", docname, "total_amount", total)  # update parent doc
-
-    # Commit the changes
-    frappe.db.commit()  # save all updates
-
-    return {"status": "success", "message": "Items updated"}
+    sales.reload()
+    total = 0
+    for row in sales.get("purchase", []):
+        total += row.amount
+    frappe.db.set_value("Sales", docname, "total_amount", total)
+    # sales.save()  
+    frappe.db.commit() 
+    frappe.msgprint(f"Sales document {docname} updated successfully.")
